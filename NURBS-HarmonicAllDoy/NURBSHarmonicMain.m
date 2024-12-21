@@ -1,0 +1,107 @@
+function [ZonalWind,MeridionalWind,MagFieldWind]=NURBSHarmonicMain(lt,lat,lon,altitude,doy,CoefficientPath)
+%When CoefficientPath is not input, put the Coefficient file into the
+%current folder.
+%Check whether the input is a vector or a scalar
+inputs={lt, lat, lon, altitude, doy};
+lt(lt==0)=24;
+for i=1:length(inputs)
+    if ~isvector(inputs{i})&&~isscalar(inputs{i})
+        error('The input parameter must be a scalar or vector');
+    end
+end
+%Gets the length of each input
+lengths=cellfun(@length, inputs);
+%Check that each vector is equal in length
+if any(lengths~=lengths(1))
+    error('All input parameters must be of equal length3');
+end
+%Detect whether the input can be executed
+if any(doy<1)||any(doy>366)
+    error('Invalid input! The day of year (doy) mut be between 1 and 366.'); 
+end
+if any(lat<-15)||any(lat>40)
+    error('Invalid input! latitude (lat) mut be between -15 and 40.'); 
+end
+if any(lon<-180)||any(lon>360)
+    error('Invalid input! longitude (lon) mut be between -180 and 360.'); 
+end
+
+if any(lt<0)||any(lt>24)
+    error('Invalid input! local time (lt) mut be between 0 and 24.'); 
+end
+if any(altitude<91)||any(altitude>300)
+    error('Invalid input! altitude mut be between 91 and 300.'); 
+end
+
+if nargin<6%Check if CoefficientPath has been entered.
+    ObDistribution=load(['ObDistribution.mat']);
+else
+    ObDistribution=load(fullfile(CoefficientPath,['ObDistribution.mat']));
+end
+ObDistribution=struct2array(ObDistribution(1));
+
+lon(lon>=-180&lon<0)=lon(lon>=-180&lon<0)+360;
+lon(lon==360)=0;
+
+ZonalWind=ones(1,length(lt))*nan;
+MeridionalWind=ones(1,length(lt))*nan;
+MagFieldWind=ones(1,length(lt))*nan;
+for ilt=1:length(lt)
+%Night data is not available at this altitude
+if altitude(ilt)>110&&altitude(ilt)<200
+    if lt(ilt)<6||lt(ilt)>18
+    ZonalWind(ilt)=nan;
+    MeridionalWind(ilt)=nan;
+    MagFieldWind(ilt)=nan;
+    continue
+%     error('Nighttime data is unavailable at this height.');
+    end
+end
+
+%Select the height grid based on the height entered
+%Remove the simulations in areas without observational support at 110-200 km
+AltitudeVector=[91:3:121 126:6:181 200:50:300];
+delta=AltitudeVector-altitude(ilt);[~,idx]=min(abs(delta));
+if altitude(ilt)>110&&altitude(ilt)<200
+    ObDistribution2=ObDistribution(:,:,idx);
+    ObDistribution2=ObDistribution2(ObDistribution2(:,4)==floor(lon(ilt)/2)*2&ObDistribution2(:,1)==ceil(lt(ilt)/0.5)*0.5&ObDistribution2(:,5)==round((lat(ilt)+15)/1.1)*1.1-15,:);
+    if isnan(ObDistribution2(7))
+        ZonalWind(ilt)=nan;
+        MeridionalWind(ilt)=nan;
+        MagFieldWind(ilt)=nan;
+        continue
+    end
+end
+%Get coefficient
+if nargin<6%Check if CoefficientPath has been entered.
+    CoefficientZonal=load(['Coefficient','Zonal','Doy',num2str(doy(ilt)),'.mat']);
+    CoefficientZonal=struct2array(CoefficientZonal(1));
+    CoefficientMeridional=load(['Coefficient','Meridional','Doy',num2str(doy(ilt)),'.mat']);
+    CoefficientMeridional=struct2array(CoefficientMeridional(1));
+    CoefficientField=load(['Coefficient','Field','Doy',num2str(doy(ilt)),'.mat']);
+    CoefficientField=struct2array(CoefficientField(1));
+else
+     CoefficientZonal=load(fullfile(CoefficientPath,['Coefficient','Zonal','Doy',num2str(doy(ilt)),'.mat']));
+     CoefficientZonal=struct2array(CoefficientZonal(1));
+     CoefficientMeridional=load(fullfile(CoefficientPath,['Coefficient','Meridional','Doy',num2str(doy(ilt)),'.mat']));
+     CoefficientMeridional=struct2array(CoefficientMeridional(1));
+     CoefficientField=load(fullfile(CoefficientPath,['Coefficient','Field','Doy',num2str(doy(ilt)),'.mat']));
+     CoefficientField=struct2array(CoefficientField(1));
+end
+%Select altitude
+CoefficientZonal=CoefficientZonal(:,:,idx);
+CoefficientMeridional=CoefficientMeridional(:,:,idx);
+CoefficientField=CoefficientField(:,:,idx);
+%Calculate the corresponding wind speed based on the coefficients and inputs.
+ControlPoint=-15:5:40;
+[Zonal]=HarmonicBsplineReverse(CoefficientZonal,ControlPoint,lat(ilt),lt(ilt),lon(ilt));
+[Meridional]=HarmonicBsplineReverse(CoefficientMeridional,ControlPoint,lat(ilt),lt(ilt),lon(ilt));
+[MagField]=HarmonicBsplineReverse(CoefficientField,ControlPoint,lat(ilt),lt(ilt),lon(ilt));
+ZonalWind(ilt)=Zonal;
+MeridionalWind(ilt)=Meridional;
+MagFieldWind(ilt)=MagField;
+%  Show progress
+%  disp(ilt/length(lt))
+end
+end
+    
